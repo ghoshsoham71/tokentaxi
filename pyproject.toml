@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokentaxi "
-version = "0.1.1"
+version = "0.1.2"
 description = "Adaptive rate-limit-aware LLM routing. Bring your own clients."
 readme = "README.md"
 requires-python = ">=3.11"
