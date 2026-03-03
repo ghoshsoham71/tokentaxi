@@ -73,7 +73,7 @@ pip install "tokentaxi[all]"
 ### From a dictionary
 
 ```python
-from tokentaxiimport LLMRouter, RouterRequest
+from tokentaxi import LLMRouter, RouterRequest
 
 router = LLMRouter.from_dict({
     "providers": [
@@ -99,7 +99,7 @@ print(response.attempts)    # 1
 ```python
 import openai
 import anthropic
-from tokentaxiimport LLMRouter
+from tokentaxi import LLMRouter
 
 openai_client    = openai.AsyncOpenAI(api_key="sk-...", timeout=30, max_retries=0)
 anthropic_client = anthropic.AsyncAnthropic(api_key="sk-ant-...", timeout=30)
