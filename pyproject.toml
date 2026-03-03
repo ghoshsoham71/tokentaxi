@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tokentaxi "
+name = "tokentaxi"
 version = "0.1.2"
 description = "Adaptive rate-limit-aware LLM routing. Bring your own clients."
 readme = "README.md"
@@ -44,11 +44,11 @@ dev       = [
 ]
 
 [project.scripts]
-tokentaxi  = "tokentaxi .cli:app"
+tokentaxi  = "tokentaxi.cli:app"
 
 [project.urls]
 "Homepage"    = "https://github.com/your-org/tokentaxi "
-"Bug Tracker" = "https://github.com/your-org/tokentaxi /issues"
+"Bug Tracker" = "https://github.com/your-org/tokentaxi/issues"
 
 # ---------------------------------------------------------------------------
 # Tool configurations
@@ -72,4 +72,4 @@ strict          = true
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["tokentaxi "]
+packages = ["tokentaxi"]
