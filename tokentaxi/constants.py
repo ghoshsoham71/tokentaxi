@@ -81,8 +81,9 @@ DEFAULT_GROQ_MODEL: str = "llama-3.1-70b-versatile"
 # ---------------------------------------------------------------------------
 # Redis key prefixes
 # ---------------------------------------------------------------------------
-REDIS_PREFIX: str = "tokentaxi "
+REDIS_PREFIX: str = "tokentaxi"
 REDIS_RPM_KEY_TMPL: str = REDIS_PREFIX + ":rpm:{provider}"
 REDIS_TPM_KEY_TMPL: str = REDIS_PREFIX + ":tpm:{provider}"
 REDIS_CIRCUIT_KEY_TMPL: str = REDIS_PREFIX + ":circuit:{provider}"
 REDIS_SESSION_KEY_TMPL: str = REDIS_PREFIX + ":session:{session_id}"
+REDIS_REGISTRY_KEY: str = REDIS_PREFIX + ":registry"

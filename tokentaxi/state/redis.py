@@ -125,6 +125,29 @@ class RedisStateBackend(AbstractStateBackend):
         await self._client.set(key, provider, ex=ttl_seconds)
 
     # ------------------------------------------------------------------
+    # Registry Synchronization
+    # ------------------------------------------------------------------
+
+    async def get_registered_providers(self) -> list[dict[str, Any]]:
+        import json
+        from ..constants import REDIS_REGISTRY_KEY
+        
+        raw_data = await self._client.hgetall(REDIS_REGISTRY_KEY)
+        results = []
+        for val in raw_data.values():
+            try:
+                results.append(json.loads(val))
+            except json.JSONDecodeError:
+                pass
+        return results
+
+    async def set_registered_provider(self, name: str, config_dict: dict[str, Any]) -> None:
+        import json
+        from ..constants import REDIS_REGISTRY_KEY
+        
+        await self._client.hset(REDIS_REGISTRY_KEY, name, json.dumps(config_dict))
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

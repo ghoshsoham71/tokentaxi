@@ -11,6 +11,7 @@ The state backend is responsible for:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class AbstractStateBackend(ABC):
@@ -72,6 +73,18 @@ class AbstractStateBackend(ABC):
         ttl_seconds: int = 3600,
     ) -> None:
         """Pin *provider* for *session_id*. Expires after *ttl_seconds*."""
+
+    # ------------------------------------------------------------------
+    # Registry Synchronization
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def get_registered_providers(self) -> list[dict[str, Any]]:
+        """Return all registered providers from the shared state."""
+
+    @abstractmethod
+    async def set_registered_provider(self, name: str, config_dict: dict[str, Any]) -> None:
+        """Persist a provider registration to the shared state."""
 
     # ------------------------------------------------------------------
     # Lifecycle

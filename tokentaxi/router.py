@@ -21,11 +21,11 @@ from .breaker.circuit import CircuitBreaker
 from .config import RouterConfig
 from .engine.estimator import estimate_tokens
 from .engine.predictor import ExhaustionPredictor
+from .engine.pricing import PricingEngine
 from .engine.scorer import LatencyTracker, ProviderScore, Scorer
 from .exceptions import AllProvidersFailed, CircuitOpenError, NoProvidersConfigured
 from .models import RouteEvent, RouterRequest, RouterResponse
-from .providers.base import BaseProvider
-from .providers.registry import ProviderRegistry
+from .registry import ProviderRegistry
 from .state.base import AbstractStateBackend
 from .state.memory import InMemoryStateBackend
 
@@ -47,6 +47,7 @@ class LLMRouter:
         self._scorer = Scorer()
         self._latency = LatencyTracker()
         self._predictor = ExhaustionPredictor(window_seconds=config.window_seconds)
+        self._pricing = PricingEngine()
         self._breaker = CircuitBreaker(
             failure_threshold=config.circuit_breaker.failure_threshold,
             cooldown_seconds=config.circuit_breaker.cooldown_seconds,
@@ -54,6 +55,11 @@ class LLMRouter:
         self._state: AbstractStateBackend = InMemoryStateBackend()
         self._initialized = False
         self._init_lock = asyncio.Lock()
+
+    @property
+    def pricing(self) -> PricingEngine:
+        """Access the internal pricing engine (primarily for testing/inspection)."""
+        return self._pricing
 
     # ------------------------------------------------------------------
     # Factory methods
@@ -109,9 +115,11 @@ class LLMRouter:
 
                 self._state = RedisStateBackend(self._config.redis_url)
 
-            # Register providers from config
-            for provider_cfg in self._config.providers:
-                await self._registry.register_from_config(provider_cfg)
+            # Link state to registry for syncing
+            self._registry._state = self._state
+
+            # Fetch pricing
+            await self._pricing.fetch_pricing()
 
             self._initialized = True
 
@@ -162,7 +170,7 @@ class LLMRouter:
         """Apply any queued BYOC registrations."""
         pending = getattr(self, "_pending_byoc", [])
         for kwargs in pending:
-            await self._registry.register_byoc(**kwargs)
+            await self._registry.register(**kwargs)
         self._pending_byoc = []
 
     # ------------------------------------------------------------------
@@ -173,9 +181,10 @@ class LLMRouter:
         self,
         estimated_tokens: int,
         priority: str,
+        optimization_strategy: str,
         force_provider: str | None,
         session_id: str | None,
-    ) -> list[BaseProvider]:
+    ) -> list[Any]:
         """
         Return providers sorted by score (highest first).
 
@@ -202,7 +211,7 @@ class LLMRouter:
             pinned_name = force_provider
 
         scored: list[ProviderScore] = []
-        unscored_fallback: list[BaseProvider] = []
+        unscored_fallback: list[Any] = []
 
         for provider in all_providers:
             # Check circuit breaker
@@ -221,6 +230,9 @@ class LLMRouter:
                 tpm_limit=provider.tpm_limit,
             )
 
+            # Get pricing for this model
+            costs = self._pricing.get_cost(provider.model) or {"prompt": 0.0, "completion": 0.0}
+            
             ps = self._scorer.score_provider(
                 name=provider.name,
                 rpm_used=rpm_used,
@@ -231,6 +243,8 @@ class LLMRouter:
                 latency_ema_ms=self._latency.get(provider.name),
                 static_weight=provider.weight,
                 priority=priority,
+                optimization_strategy=optimization_strategy,
+                cost_per_1k_tokens=costs["prompt"] * 1000,
                 is_at_risk=is_at_risk,
                 high_priority_reserve_pct=self._config.high_priority_reserve_pct,
             )
@@ -244,7 +258,7 @@ class LLMRouter:
 
         # Build final ordered provider list
         provider_map = {p.name: p for p in all_providers}
-        ranked: list[BaseProvider] = [
+        ranked: list[Any] = [
             provider_map[ps.name] for ps in ranked_scores if ps.name in provider_map
         ]
 
@@ -269,20 +283,6 @@ class LLMRouter:
     async def chat(self, request: RouterRequest) -> RouterResponse:
         """
         Route a chat completion request to the best available provider.
-
-        Tries providers in ranked order until one succeeds. If all fail,
-        raises AllProvidersFailed.
-
-        Parameters
-        ----------
-        request:
-            The routing request.
-
-        Returns
-        -------
-        RouterResponse
-            The successful completion result, including metadata about
-            which provider was used and how many attempts were made.
         """
         await self._ensure_initialized()
         await self._flush_pending_registrations()
@@ -292,6 +292,7 @@ class LLMRouter:
         ranked = await self._get_ranked_providers(
             estimated_tokens=estimated_tokens,
             priority=request.priority,
+            optimization_strategy=request.optimization_strategy,
             force_provider=request.force_provider,
             session_id=request.session_id,
         )
@@ -330,6 +331,9 @@ class LLMRouter:
             self._latency.update(provider.name, latency_ms)
             self._predictor.record(provider.name, total_tokens)
             await self._breaker.record_success(provider.name)
+            
+            # Calculate cost
+            cost_usd = self._pricing.calculate_request_cost(provider.model, input_tokens, output_tokens)
 
             # Session affinity — pin provider for future requests
             if request.session_id:
@@ -340,8 +344,8 @@ class LLMRouter:
                 provider.name, self._config.window_seconds
             )
             headroom_pct = min(
-                (1 - rpm_used / provider.rpm_limit) * 100,
-                (1 - tpm_used / provider.tpm_limit) * 100,
+                (1 - (rpm_used / provider.rpm_limit if provider.rpm_limit > 0 else 1.0)) * 100,
+                (1 - (tpm_used / provider.tpm_limit if provider.tpm_limit > 0 else 1.0)) * 100,
             )
 
             # Fire callback
@@ -357,6 +361,7 @@ class LLMRouter:
                     attempt_number=attempt_number,
                     session_id=request.session_id,
                     priority=request.priority,
+                    cost_usd=cost_usd,
                 )
                 try:
                     await self._config.on_route(event)
@@ -371,6 +376,7 @@ class LLMRouter:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 attempts=attempt_number,
+                cost_usd=cost_usd,
             )
 
         raise AllProvidersFailed(
@@ -382,11 +388,6 @@ class LLMRouter:
     async def stream(self, request: RouterRequest) -> AsyncIterator[str]:
         """
         Route a streaming chat completion request.
-
-        Yields text chunks as they arrive from the provider. Attempts
-        fallback to the next provider if the initial provider fails before
-        streaming begins. Once streaming has started, fallback is not
-        possible.
         """
         await self._ensure_initialized()
         await self._flush_pending_registrations()
@@ -395,6 +396,7 @@ class LLMRouter:
         ranked = await self._get_ranked_providers(
             estimated_tokens=estimated_tokens,
             priority=request.priority,
+            optimization_strategy=request.optimization_strategy,
             force_provider=request.force_provider,
             session_id=request.session_id,
         )
@@ -444,14 +446,13 @@ class LLMRouter:
 
     async def status(self) -> dict[str, Any]:
         """
-        Return the current state of all providers.
-
-        Includes RPM/TPM usage, headroom percentage, circuit state, and
-        average latency. Can be served via a FastAPI health endpoint or
-        displayed in the CLI.
+        Return the current status of the registry.
         """
         await self._ensure_initialized()
         await self._flush_pending_registrations()
+        
+        # Discover providers from shared state (e.g. registered in other processes)
+        await self._registry.refresh_from_state()
 
         result: dict[str, Any] = {}
         providers = await self._registry.get_all()
@@ -462,8 +463,8 @@ class LLMRouter:
             )
             circuit_status = await self._breaker.get_status(provider.name)
 
-            rpm_headroom_pct = max(0.0, (1 - rpm_used / provider.rpm_limit) * 100)
-            tpm_headroom_pct = max(0.0, (1 - tpm_used / provider.tpm_limit) * 100)
+            rpm_headroom_pct = max(0.0, (1 - rpm_used / provider.rpm_limit if provider.rpm_limit > 0 else 1.0) * 100)
+            tpm_headroom_pct = max(0.0, (1 - tpm_used / provider.tpm_limit if provider.tpm_limit > 0 else 1.0) * 100)
             headroom_pct = min(rpm_headroom_pct, tpm_headroom_pct)
 
             result[provider.name] = {
@@ -479,7 +480,7 @@ class LLMRouter:
         return result
 
     async def close(self) -> None:
-        """Release all resources (HTTP clients, Redis connections, etc.)."""
+        """Release all resources."""
         await self._registry.close_all()
         await self._state.close()
 

@@ -53,6 +53,7 @@ class ProviderScore:
     static_score: float
     rpm_headroom: float
     tpm_headroom: float
+    cost_score: float = 0.0
     is_at_risk: bool = False
 
 
@@ -107,6 +108,8 @@ class Scorer:
         latency_ema_ms: float,
         static_weight: float,
         priority: str,
+        optimization_strategy: str = "latency",
+        cost_per_1k_tokens: float = 0.0,
         is_at_risk: bool = False,
         high_priority_reserve_pct: float = 0.0,
     ) -> ProviderScore | None:
@@ -173,12 +176,27 @@ class Scorer:
         # --- Static score ------------------------------------------------
         static_score = max(0.0, min(1.0, static_weight))
 
+        # --- Cost score --------------------------------------------------
+        # Normalize cost. 0.1 USD per 1k = 100 per 1M (very expensive)
+        # 0.0001 USD per 1k = 0.1 per 1M (very cheap)
+        cost_score = max(0.0, 1.0 - (cost_per_1k_tokens / 0.1))
+
         # --- Weighted sum ------------------------------------------------
         w_cap, w_lat, w_sta = _PRIORITY_WEIGHTS.get(priority, _PRIORITY_WEIGHTS["normal"])
+        
+        # Adjust weights based on optimization strategy
+        if optimization_strategy == "cost":
+            w_cap, w_lat, w_sta, w_cost = 0.2, 0.1, 0.1, 0.6
+        elif optimization_strategy == "balanced":
+            w_cap, w_lat, w_sta, w_cost = 0.3, 0.2, 0.1, 0.4
+        else: # latency
+            w_cap, w_lat, w_sta, w_cost = w_cap * 0.7, w_lat * 0.7, w_sta * 0.7, 0.3
+
         score = (
             capacity_score * w_cap
             + latency_score * w_lat
             + static_score * w_sta
+            + cost_score * w_cost
         )
 
         return ProviderScore(
@@ -189,6 +207,7 @@ class Scorer:
             static_score=static_score,
             rpm_headroom=rpm_headroom,
             tpm_headroom=tpm_headroom,
+            cost_score=cost_score,
             is_at_risk=is_at_risk,
         )
 

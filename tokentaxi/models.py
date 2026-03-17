@@ -60,6 +60,10 @@ class RouterRequest(BaseModel):
         default=None,
         description="Pin this request to a specific provider. Fallback still applies if it fails.",
     )
+    optimization_strategy: str = Field(
+        default="latency",
+        description="Routing strategy: 'latency' (default) | 'cost' | 'balanced'.",
+    )
 
     @field_validator("priority")
     @classmethod
@@ -84,6 +88,7 @@ class RouterResponse(BaseModel):
         ...,
         description="Number of providers tried before a successful response (1 = no fallback needed).",
     )
+    cost_usd: float | None = Field(default=None, description="Estimated cost of the request in USD.")
 
 
 class RouteEvent(BaseModel):
@@ -103,3 +108,4 @@ class RouteEvent(BaseModel):
     attempt_number: int
     session_id: str | None
     priority: str
+    cost_usd: float | None = None

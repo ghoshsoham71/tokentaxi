@@ -175,7 +175,7 @@ class RouterConfig(BaseModel):
 
         data: dict[str, Any] = {"providers": providers}
 
-        redis_url = os.environ.get("tokentaxi _REDIS_URL")
+        redis_url = os.environ.get("REDIS_URL") or os.environ.get("TOKENTAXI_REDIS_URL") or os.environ.get("tokentaxi_REDIS_URL")
         if redis_url:
             data["redis_url"] = redis_url
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokentaxi"
-version = "0.1.3"
+version = "1.1.4"
 description = "Adaptive rate-limit-aware LLM routing. Bring your own clients."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,13 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "tiktoken>=0.7",
+    "openai>=1.0",
+    "anthropic>=0.30",
+    "google-generativeai>=0.7",
+    "google-genai>=0.1",
+    "mistralai>=1.0",
+    "cohere>=5.0",
+    "boto3>=1.34",
 ]
 
 [project.optional-dependencies]

@@ -102,3 +102,19 @@ class InMemoryStateBackend(AbstractStateBackend):
         expiry = time.time() + ttl_seconds
         async with self._session_lock:
             self._sessions[session_id] = (provider, expiry)
+
+    # ------------------------------------------------------------------
+    # Registry Synchronization
+    # ------------------------------------------------------------------
+
+    async def get_registered_providers(self) -> list[dict[str, Any]]:
+        async with self._lock:
+            return getattr(self, "_registry_cache", [])
+
+    async def set_registered_provider(self, name: str, config_dict: dict[str, Any]) -> None:
+        async with self._lock:
+            if not hasattr(self, "_registry_cache"):
+                self._registry_cache = []
+            # Update or add
+            self._registry_cache = [p for p in self._registry_cache if p["name"] != name]
+            self._registry_cache.append(config_dict)
